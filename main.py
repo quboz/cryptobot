@@ -557,7 +557,25 @@ async def fetch_stat_text(force_send=False):
         await page.wait_for_load_state("networkidle")
         print("⏱ Загрузка страницы:", round(time.time() - start, 2), "сек")
 
-        await page.wait_for_selector("h2.css-1ld3mhe:has-text('Самые популярные по запросам')", timeout=10000)
+# === Проверка заголовка ===
+        found = False
+        try:
+            await page.wait_for_selector("h2:has-text('Most Searched')", timeout=20000)
+            logging.info("✅ Найден заголовок: Most Searched")
+            found = True
+        except:
+            try:
+                await page.wait_for_selector("h2.css-1ld3mhe:has-text('Самые популярные по запросам')", timeout=30000)
+                logging.info("✅ Найден заголовок: Самые популярные по запросам")
+                found = True
+            except:
+                logging.error("❌ Не удалось найти заголовок статистики")
+
+        if not found:
+            raise RuntimeError("Заголовок 'Most Searched' или 'Самые популярные по запросам' не найден")
+
+
+
 
         try:
             await page.locator("div.css-1h8s7v0").click(timeout=3000)
