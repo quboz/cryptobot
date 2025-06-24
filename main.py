@@ -21,7 +21,7 @@ import time
 
 # === Настройки ===
 API_TOKEN = "8138380518:AAHt-pjc94XFKnQW8MfJHX-WeBhZPaIJvJY"
-CHANNEL_ID = -1002745957178
+CHANNEL_ID = 1685580880
 DB_PATH = "profiles.db"
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36"
 CACHE_FILE = "stat_cache.json"
@@ -38,7 +38,7 @@ TRACKED_TOKENS = set()
 
 openai_client = OpenAI(
     base_url="https://openrouter.ai/api/v1",
-    api_key="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",
+    api_key="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",
 )
 
 def migrate_db():
@@ -209,7 +209,7 @@ async def fetch_latest_post(profile_url: str):
                     logging.info("Перевод поста на русский...")
                     response = openai_client.chat.completions.create(
                         model="meta-llama/llama-4-maverick:free",
-                        messages=[{"role": "user", "content": f"Переведи на русский: {text_to_process}"}],
+                        messages=[{"role": "user", "content": f"Переведи на русский(и не пиши фразы вроде переведено на русский)): {text_to_process}"}],
                         max_tokens=2000
                     )
                     translated = response.choices[0].message.content.strip()
@@ -226,7 +226,7 @@ async def fetch_latest_post(profile_url: str):
                         model="meta-llama/llama-4-maverick:free",
                         messages=[{
                             "role": "user",
-                            "content": f"Сократи текст, оставив суть (без примеров и повторов): {text_to_process}"
+                            "content": f"Сократи текст, оставив суть (без примеров и повторов, также не пиши фразы по типу: вот ващ сокращенный текст): {text_to_process}"
                         }],
                         max_tokens=1000
                     )
@@ -292,11 +292,15 @@ async def cmd_add(message: Message):
         await message.reply("❌ Формат: /add <ссылка>")
         return
     url = parts[1]
-    if "binance.com/ru/square/profile/" not in url:
+    if not (
+        "binance.com/ru/square/profile/" in url or
+        "binance.com/en/square/profile/" in url
+    ):
         await message.reply("❌ Неверная ссылка на профиль Binance Square")
         return
     add_profile(url)
     await message.reply("✅ Профиль добавлен!")
+
 
 @dp.message(Command("last"))
 async def cmd_last(message: Message):
@@ -428,7 +432,7 @@ async def cmd_news(message: Message, bot: Bot):
                                 messages=[
                                     {
                                         "role": "user",
-                                        "content": f"Переведи этот текст на русский:\n\n{text_to_process}"
+                                        "content": f"Переведи этот текст на русский(и не пиши фразы вроде переведено на русский):\n\n{text_to_process}"
                                     }
                                 ]
                             )
@@ -528,7 +532,7 @@ def format_monospaced_table(positions_dict: dict, old_positions: dict, old_token
         if name not in old_tokens:
             note = "🆕"
         elif old_positions[name]['pos'] != data['pos']:
-            old_pos = old_positions[name]['pos'] + 1  # +1 чтобы было как у людей
+            old_pos = old_positions[name]['pos'] + 1
             new_pos = data['pos'] + 1
             arrow = "🔺" if new_pos < old_pos else "🔻"
             note = f"{arrow} {old_pos}→{new_pos}"
@@ -538,7 +542,9 @@ def format_monospaced_table(positions_dict: dict, old_positions: dict, old_token
 
         lines.append(f"{i+1:<2} {name:<10} {price:<10} {change:<7} {note}")
 
-    return "<pre>\n" + "\n".join(lines) + "\n</pre>"
+    result = "<pre>\n" + "\n".join(lines) + "\n</pre>"
+    logging.info(f"📄 Сформирована таблица:\n{result}")
+    return result
 
 async def fetch_stat_text(force_send=False):
     url = "https://www.binance.com/ru/square/"
@@ -555,9 +561,9 @@ async def fetch_stat_text(force_send=False):
         start = time.time()
         await page.goto(url, timeout=30000)
         await page.wait_for_load_state("networkidle")
-        print("⏱ Загрузка страницы:", round(time.time() - start, 2), "сек")
+        logging.info(f"⏱ Загрузка страницы: {round(time.time() - start, 2)} сек")
 
-# === Проверка заголовка ===
+        # === Проверка заголовка ===
         found = False
         try:
             await page.wait_for_selector("h2:has-text('Most Searched')", timeout=20000)
@@ -574,26 +580,25 @@ async def fetch_stat_text(force_send=False):
         if not found:
             raise RuntimeError("Заголовок 'Most Searched' или 'Самые популярные по запросам' не найден")
 
-
-
-
+        # Пробуем раскрыть весь блок (если требуется)
         try:
             await page.locator("div.css-1h8s7v0").click(timeout=3000)
             await page.wait_for_timeout(1000)
         except:
             pass
 
+        # Получаем монеты
         stat_section = page.locator("div.css-6srrto")
         links = stat_section.locator("a")
         count = await links.count()
-        print("🔢 Найдено монет:", count)
+        logging.info(f"🔢 Найдено монет: {count}")
 
         positions = {}
-        changed = False
-
         for i in range(count):
             try:
+                logging.info(f"🔍 Обрабатываем монету #{i+1}")
                 coin = links.nth(i)
+
                 name = await coin.locator("div.css-1q7imhr").inner_text()
                 price = await coin.locator("div.css-1dru1te").inner_text()
                 change = await coin.locator("div.css-1qhsfgf, div.css-1wsvtgi").inner_text()
@@ -610,30 +615,35 @@ async def fetch_stat_text(force_send=False):
                     "change": change,
                     "badge": badge
                 }
-            except:
-                continue
 
+                logging.info(f"✅ {name}: {price} ({change}) {badge}")
+
+            except Exception as e:
+                logging.warning(f"⚠️ Ошибка при разборе монеты #{i+1}: {e}")
+
+        # Загрузка предыдущей статистики
         old_positions = {}
         if os.path.exists(CACHE_FILE):
             with open(CACHE_FILE, "r", encoding="utf-8") as f:
                 old_positions = json.load(f)
 
+            # Старый формат кэша
             if isinstance(list(old_positions.values())[0], int):
                 old_positions = {
                     k: {"pos": v, "price": "", "change": "", "badge": ""}
                     for k, v in old_positions.items()
                 }
+
         old_tokens = set(old_positions.keys())
 
-
+        # Проверка изменений
+        changed = False
         for name in positions:
-            if name not in old_positions:
-                changed = True
-                break
-            if positions[name]["pos"] != old_positions[name]["pos"]:
+            if name not in old_positions or positions[name]["pos"] != old_positions[name]["pos"]:
                 changed = True
                 break
 
+        # Сохраняем новый кэш
         with open(CACHE_FILE, "w", encoding="utf-8") as f:
             json.dump(positions, f, ensure_ascii=False, indent=2)
 
@@ -641,25 +651,41 @@ async def fetch_stat_text(force_send=False):
 
         if changed or force_send:
             table = format_monospaced_table(positions, old_positions, old_tokens)
+            logging.info(f"📊 Возвращаем таблицу длиной {len(table)} символов")
             return f"📊 <b>Самые популярные по запросам (6 ч.)</b>\n{table}"
         else:
+            logging.info("ℹ️ Нет изменений — не отправляем")
             return None
+
 
 @router.message(F.text == "/stat")
 async def stat_command(message: types.Message):
+    logging.info(f"📥 Получена команда /stat от user_id={message.from_user.id}")
     await message.answer("⏳ Получаю данные с Binance Square...")
+
     try:
         text = await fetch_stat_text()
+        logging.info(f"📊 fetch_stat_text вернул: {'есть текст' if text else 'пусто'}")
+
         if text:
-            await bot.send_message(chat_id=CHANNEL_ID, text=text, parse_mode=ParseMode.HTML)
+            await message.answer(text, parse_mode=ParseMode.HTML)
             await message.answer("✅ Данные отправлены.")
         else:
-
+            logging.info("📁 Попытка отправки из кэша...")
             from_cache = await fetch_stat_text(force_send=True)
-            await bot.send_message(chat_id=CHANNEL_ID, text=from_cache, parse_mode=ParseMode.HTML)
-            await message.answer("📋 Отправлен текущий мониторинг.")
+            logging.info(f"📦 fetch_stat_text(force_send=True) вернул: {'есть кэш' if from_cache else 'тоже пусто'}")
+
+            if from_cache:
+                await message.answer(from_cache, parse_mode=ParseMode.HTML)
+                await message.answer("📋 Отправлен текущий мониторинг.")
+            else:
+                await message.answer("⚠️ Нет новых данных и кэш тоже пуст.")
     except Exception as e:
+        logging.exception("❌ Ошибка внутри /stat")
         await message.answer(f"❌ Ошибка: {e}")
+
+
+
 
 async def check_stat_periodically():
     while True:
