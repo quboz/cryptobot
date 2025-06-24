@@ -39,7 +39,7 @@ TRACKED_TOKENS = set()
 
 openai_client = OpenAI(
     base_url="https://openrouter.ai/api/v1",
-    api_key="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",
+    api_key="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",
 )
 
 def migrate_db():
