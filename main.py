@@ -19,7 +19,7 @@ from html import escape
 import json
 import time
 
-# === Настройки ===
+
 API_TOKEN = "8138380518:AAHt-pjc94XFKnQW8MfJHX-WeBhZPaIJvJY"
 CHANNEL_ID = 1685580880
 DB_PATH = "profiles.db"
@@ -57,7 +57,7 @@ def migrate_db():
         conn.close()
 
 def init_db():
-    # === БД 1: tracked_posts.db ===
+
     with sqlite3.connect(DB_PATH1) as conn1:
         c1 = conn1.cursor()
         c1.execute("""
@@ -69,7 +69,7 @@ def init_db():
         """)
         conn1.commit()
 
-    # === БД 2: profiles.db ===
+
     with sqlite3.connect("profiles.db") as conn2:
         c2 = conn2.cursor()
         c2.execute('''
@@ -119,20 +119,19 @@ async def fetch_latest_post(profile_url: str):
         try:
             await page.goto(profile_url, timeout=60000)
             await page.wait_for_load_state("domcontentloaded")
-            # Увеличим время ожидания и добавим проверку альтернативных селекторов
             try:
                 await page.wait_for_selector("div.card-content-box", timeout=30000)
             except:
-                await page.wait_for_selector("div.css-1s5s0hx", timeout=30000)  # Альтернативный селектор
+                await page.wait_for_selector("div.css-1s5s0hx", timeout=30000)  
         except Exception as e:
             logging.error(f"Ошибка загрузки страницы: {e}")
             await browser.close()
             return None
 
-        # Пробуем разные варианты поиска карточек
+        
         cards = await page.query_selector_all("div.card-content-box")
         if not cards:
-            cards = await page.query_selector_all("div.css-1s5s0hx")  # Альтернативный селектор
+            cards = await page.query_selector_all("div.css-1s5s0hx")  
         
         if not cards:
             logging.warning("Посты не найдены на странице")
@@ -141,13 +140,13 @@ async def fetch_latest_post(profile_url: str):
 
         card = cards[0]
         try:
-            # Пробуем разные методы получения текста
+            
             try:
                 text = await card.inner_text()
             except:
                 text = await card.evaluate("el => el.textContent")
             
-            # Удаляем технические элементы перед обработкой
+            
             for unwanted in [
                 "см. оригинал", "subscribe to", "подробнее", "see original", 
                 "likecomment", "share", "comment", "like", "repost"
@@ -164,43 +163,43 @@ async def fetch_latest_post(profile_url: str):
                     continue
                 if line in seen:
                     continue
-                if re.match(r"^\d+(\.\d+)?[kK]?$", line):  # Числа
+                if re.match(r"^\d+(\.\d+)?[kK]?$", line):  
                     continue
-                if re.fullmatch(r"[A-Z0-9]+", line):  # HEX-коды
+                if re.fullmatch(r"[A-Z0-9]+", line):  
                     continue
                 if any(phrase in line.lower() for phrase in ["см. оригинал", "subscribe to"]):
                     continue
                 seen.add(line)
                 cleaned_lines.append(line)
 
-            # Удаляем служебную информацию в начале
+            
             while cleaned_lines and cleaned_lines[0].lower().startswith(("binance", "bibi")):
                 cleaned_lines.pop(0)
 
-            # Извлекаем заголовок
+            
             title_el = await card.query_selector("div.font-bold, .font-bold")
             if not title_el:
-                title_el = await card.query_selector("div.css-1k5hq0n")  # Альтернативный селектор
+                title_el = await card.query_selector("div.css-1k5hq0n")  
                 
             header = await title_el.inner_text() if title_el else ""
 
-            # Удаляем дубликат заголовка
+            
             if cleaned_lines and cleaned_lines[0] == header:
                 cleaned_lines.pop(0)
 
             text_to_process = "\n".join(cleaned_lines).strip()
 
-            # Важная проверка: если текста недостаточно
+            
             if not text_to_process or len(text_to_process) < 20:
                 logging.warning(f"Текст слишком короткий: {text_to_process}")
                 await browser.close()
                 return None
 
-            # Генерация ID до обработки ИИ
+            
             cleaned_for_id = re.sub(r'\s+', '', (header + text_to_process).strip())
             post_id = hashlib.md5(cleaned_for_id.encode()).hexdigest()
 
-            # Перевод только если текст преимущественно на английском
+            
             russian_chars = len(re.findall(r'[а-яА-Я]', text_to_process))
             english_chars = len(re.findall(r'[a-zA-Z]', text_to_process))
             
@@ -218,7 +217,7 @@ async def fetch_latest_post(profile_url: str):
                 except Exception as e:
                     logging.warning(f"Ошибка перевода: {e}")
 
-            # Сжатие только для длинных текстов
+            
             if len(text_to_process) > 300:
                 try:
                     logging.info("Сжатие длинного поста...")
@@ -236,12 +235,12 @@ async def fetch_latest_post(profile_url: str):
                 except Exception as e:
                     logging.warning(f"Ошибка сжатия: {e}")
 
-            # Форматирование текста
+            
             formatted_text = (
                 f"<b>{escape(header)}</b>\n\n" if header else ""
             ) + f"<blockquote>{escape(text_to_process)}</blockquote>"
 
-            # Получение изображений
+            
             image_urls = []
             image_elements = await card.query_selector_all("img")
             for img in image_elements:
@@ -254,7 +253,7 @@ async def fetch_latest_post(profile_url: str):
                     if src.startswith("http"):
                         image_urls.append(src)
 
-            # Информация об авторе
+            
             nickname = profile_url.split("/")[-1]
             button = InlineKeyboardMarkup(
                 inline_keyboard=[[InlineKeyboardButton(text="🔗 Источник", url=profile_url)]]
@@ -411,7 +410,7 @@ async def cmd_news(message: Message, bot: Bot):
                     await card.evaluate("el => el.click()")
                     await page.wait_for_selector("div#articleBody", timeout=20000)
 
-                    # Перевод (если есть кнопка)
+                    
                     try:
                         translate_btn = page.locator("div.common-trans-btn-list-item-text.css-vurnku >> text=Перевести")
                         if await translate_btn.count() > 0:
@@ -423,7 +422,7 @@ async def cmd_news(message: Message, bot: Bot):
                     raw_content = await page.locator("div.richtext-container").inner_text()
                     text_to_process = raw_content.strip()
 
-                    # === Перевод текста на русский, если он на английском ===
+                    
                     if not re.search(r'[а-яА-Я]', text_to_process):
                         try:
                             logging.info("🌐 Переводим пост на русский...")
@@ -440,7 +439,7 @@ async def cmd_news(message: Message, bot: Bot):
                         except Exception as e:
                             logging.warning(f"⚠️ Ошибка при переводе: {e}")
 
-                    # === Сокращение текста ===
+                    
                     try:
                         logging.info("✂️ Сокращаем текст...")
                         compress_response = openai_client.chat.completions.create(
@@ -463,7 +462,7 @@ async def cmd_news(message: Message, bot: Bot):
 
                     safe_content = escape(text_to_process)
 
-                    # Автор
+                    
                     try:
                         profile_link = await page.locator("div.nick-username a").first.get_attribute("href")
                         username = profile_link.split("/")[-1] if profile_link else "Автор"
@@ -474,7 +473,7 @@ async def cmd_news(message: Message, bot: Bot):
                         logging.error(f"❗ Не удалось получить имя автора: {e}")
                         formatted_nick = "Автор неизвестен"
 
-                    # Время
+                    
                     try:
                         post_time = await page.locator("div.css-12fealn > span").first.inner_text()
                     except Exception as e:
@@ -483,7 +482,7 @@ async def cmd_news(message: Message, bot: Bot):
 
                     author_block = escape(f"{formatted_nick} | 🕒 {post_time}")
 
-                    # Ссылка на источник
+                    
                     source_url = page.url
                     keyboard = InlineKeyboardMarkup(
                         inline_keyboard=[[InlineKeyboardButton(text="🔗 Ссылка на источник", url=source_url)]]
@@ -563,7 +562,7 @@ async def fetch_stat_text(force_send=False):
         await page.wait_for_load_state("networkidle")
         logging.info(f"⏱ Загрузка страницы: {round(time.time() - start, 2)} сек")
 
-        # === Проверка заголовка ===
+        
         found = False
         try:
             await page.wait_for_selector("h2:has-text('Most Searched')", timeout=20000)
@@ -580,7 +579,7 @@ async def fetch_stat_text(force_send=False):
         if not found:
             raise RuntimeError("Заголовок 'Most Searched' или 'Самые популярные по запросам' не найден")
 
-        # Пробуем раскрыть весь блок (если требуется)
+        
         try:
             await page.locator("div.css-1h8s7v0").click(timeout=3000)
             await page.wait_for_timeout(1000)
@@ -621,7 +620,7 @@ async def fetch_stat_text(force_send=False):
             except Exception as e:
                 logging.warning(f"⚠️ Ошибка при разборе монеты #{i+1}: {e}")
 
-        # Загрузка предыдущей статистики
+        
         old_positions = {}
         if os.path.exists(CACHE_FILE):
             with open(CACHE_FILE, "r", encoding="utf-8") as f:
@@ -636,7 +635,7 @@ async def fetch_stat_text(force_send=False):
 
         old_tokens = set(old_positions.keys())
 
-        # Проверка изменений
+        
         changed = False
         for name in positions:
             if name not in old_positions or positions[name]["pos"] != old_positions[name]["pos"]:
@@ -712,7 +711,7 @@ def is_new_post(token: str, post_id: str) -> bool:
         return c.fetchone() is None
 
 
-# === Парсинг поста ===
+
 async def parse_latest_post(token: str):
     url = f"https://www.binance.com/ru/square/search?s={token}"
     async with async_playwright() as p:
@@ -743,7 +742,7 @@ async def parse_latest_post(token: str):
         if not text_to_process or len(text_to_process) < 10:
             return None
 
-        # Перевод
+        
         if not re.search(r'[а-яА-Я]', text_to_process):
             try:
                 response = openai_client.chat.completions.create(
@@ -754,7 +753,7 @@ async def parse_latest_post(token: str):
             except:
                 pass
 
-        # Сжатие
+        
         if text_to_process.strip():
             try:
                 compress_response = openai_client.chat.completions.create(
@@ -854,6 +853,21 @@ async def tracker_loop():
             except Exception as e:
                 logging.warning(f"⚠️ Ошибка трекинга для {token}: {e}")
         await asyncio.sleep(180)
+
+
+@dp.message(Command("start"))
+async def cmd_start(message: Message):
+    text = (
+        "/list - список источников(профилей) с которых будут браться новые посты\n"
+        "/add - добавить источник(профиль) для отслеживания\n"
+        "/del - удалить источник(профиль) с отслеживания\n\n"
+        "/stat - запрашивает мониторинг самых популярных монет и скидывает их изменения(если есть)\n"
+        "/track 'токен'  - включает трекер на нужный токен\n"
+        "/news 'токен' 'кол-во постов' - отправляет последние новости по токену\n\n"
+        "*чтобы получить последнюю новость по токену, делаешь \n"
+        "/news 'токен' 1"
+    )
+    await message.answer(text)
 
 
 async def main():
