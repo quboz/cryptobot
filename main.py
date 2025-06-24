@@ -18,7 +18,8 @@ import html
 from html import escape
 import json
 import time
-
+from datetime import datetime, timedelta
+import re
 
 API_TOKEN = "8138380518:AAHt-pjc94XFKnQW8MfJHX-WeBhZPaIJvJY"
 CHANNEL_ID = 1685580880
@@ -38,7 +39,7 @@ TRACKED_TOKENS = set()
 
 openai_client = OpenAI(
     base_url="https://openrouter.ai/api/v1",
-    api_key="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",
+    api_key="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",
 )
 
 def migrate_db():
@@ -368,6 +369,41 @@ async def check_new_posts():
         await asyncio.sleep(60)
 
 
+
+
+
+from datetime import datetime, timedelta
+import re
+
+MONTHS_ALL = {
+    "янв.": 1, "февр.": 2, "марта": 3, "апр.": 4, "мая": 5, "июн.": 6,
+    "июля": 7, "авг.": 8, "сент.": 9, "окт.": 10, "нояб.": 11, "дек.": 12,
+    "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
+    "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12
+}
+
+def parse_relative_time(text: str) -> datetime:
+    now = datetime.now()
+    text = text.strip().lower()
+
+    if "h" in text:
+        hours = int(re.sub(r"[^\d]", "", text))
+        return now - timedelta(hours=hours)
+    if "d" in text:
+        days = int(re.sub(r"[^\d]", "", text))
+        return now - timedelta(days=days)
+
+    for name, num in MONTHS_ALL.items():
+        if name in text:
+            try:
+                day = int(re.sub(r"[^\d]", "", text))
+                return datetime(now.year, num, day)
+            except:
+                return now
+
+    return now
+
+
 @dp.message(Command("news"))
 async def cmd_news(message: Message, bot: Bot):
     args = message.text.strip().split()
@@ -387,19 +423,16 @@ async def cmd_news(message: Message, bot: Bot):
     url = f"https://www.binance.com/ru/square/search?s={token}"
     await message.reply(f"🔍 Парсим <b>{limit}</b> постов по токену <b>{token.upper()}</b>...")
 
+    posts = []
     try:
         async with async_playwright() as p:
             browser = await p.chromium.launch(headless=True)
-            context = await browser.new_context(
-                locale="ru-RU",
-                extra_http_headers={"Accept-Language": "ru-RU,ru;q=0.9"},
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36"
-            )
+            context = await browser.new_context(locale="ru-RU", user_agent=USER_AGENT)
             page = await context.new_page()
             await page.goto(url)
             await page.wait_for_selector("div.card-content-box", timeout=60000)
-
             cards = await page.query_selector_all("div.card-content-box")
+
             if not cards:
                 await message.reply("⚠️ Посты не найдены.")
                 return
@@ -410,94 +443,82 @@ async def cmd_news(message: Message, bot: Bot):
                     await card.evaluate("el => el.click()")
                     await page.wait_for_selector("div#articleBody", timeout=20000)
 
-                    
                     try:
                         translate_btn = page.locator("div.common-trans-btn-list-item-text.css-vurnku >> text=Перевести")
                         if await translate_btn.count() > 0:
                             await translate_btn.click()
                             await asyncio.sleep(1.5)
-                    except Exception as e:
-                        logging.warning(f"⚠️ Не удалось нажать кнопку перевода: {e}")
+                    except:
+                        pass
 
                     raw_content = await page.locator("div.richtext-container").inner_text()
                     text_to_process = raw_content.strip()
 
-                    
+                    if len(text_to_process) < 20 or text_to_process.lower() in {"", "none"}:
+                        logging.info("⚠️ Пропущен пустой или короткий пост")
+                        await page.go_back()
+                        await page.wait_for_selector("div.card-content-box", timeout=15000)
+                        cards = await page.query_selector_all("div.card-content-box")
+                        continue
+
                     if not re.search(r'[а-яА-Я]', text_to_process):
                         try:
-                            logging.info("🌐 Переводим пост на русский...")
                             response = openai_client.chat.completions.create(
                                 model="meta-llama/llama-4-maverick:free",
                                 messages=[
-                                    {
-                                        "role": "user",
-                                        "content": f"Переведи этот текст на русский(и не пиши фразы вроде переведено на русский):\n\n{text_to_process}"
-                                    }
+                                    {"role": "user", "content": f"Переведи на русский (без фраз вроде 'вот перевод'):\n\n{text_to_process}"}
                                 ]
                             )
                             text_to_process = response.choices[0].message.content.strip()
-                        except Exception as e:
-                            logging.warning(f"⚠️ Ошибка при переводе: {e}")
+                        except:
+                            pass
 
-                    
                     try:
-                        logging.info("✂️ Сокращаем текст...")
                         compress_response = openai_client.chat.completions.create(
                             model="meta-llama/llama-4-maverick:free",
                             messages=[
-                                {
-                                    "role": "user",
-                                    "content": (
-                                            "Сократи этот текст, оставь только основную суть. "
-                                            "Не добавляй пояснений, заголовков и фраз вроде 'Вот сокращённая версия'. "
-                                            "Верни только сжатый текст:\n\n"
-                                            f"{text_to_process}"
-                                        )
-                                }
+                                {"role": "user", "content": (
+                                    "Сократи этот текст, сохранив суть. "
+                                    "Без примеров, повторов и пояснений:\n\n" + text_to_process
+                                )}
                             ]
                         )
                         text_to_process = compress_response.choices[0].message.content.strip()
-                    except Exception as e:
-                        logging.warning(f"⚠️ Ошибка при сокращении: {e}")
+                    except:
+                        pass
 
                     safe_content = escape(text_to_process)
 
-                    
                     try:
                         profile_link = await page.locator("div.nick-username a").first.get_attribute("href")
                         username = profile_link.split("/")[-1] if profile_link else "Автор"
                         is_verified = await page.locator("div.avatar-name-container svg").count() > 0
-                        verified_prefix = "✅" if is_verified else ""
-                        formatted_nick = f"{verified_prefix}@{username}"
-                    except Exception as e:
-                        logging.error(f"❗ Не удалось получить имя автора: {e}")
+                        formatted_nick = f"{'✅' if is_verified else ''}@{username}"
+                    except:
                         formatted_nick = "Автор неизвестен"
 
-                    
                     try:
-                        post_time = await page.locator("div.css-12fealn > span").first.inner_text()
-                    except Exception as e:
-                        logging.warning(f"⚠️ Не удалось получить время поста: {e}")
-                        post_time = "время неизвестно"
+                        post_time_str = await page.locator("div.css-12fealn > span").first.inner_text()
+                        post_time = parse_relative_time(post_time_str)
+                        post_time_fmt = post_time_str
+                    except:
+                        post_time = datetime.now()
+                        post_time_fmt = "время неизвестно"
 
-                    author_block = escape(f"{formatted_nick} | 🕒 {post_time}")
+                    # 🔍 Проверка на наличие изображения
+                    has_image = False
+                    try:
+                        img_el = await page.query_selector("#articleBody img")
+                        has_image = img_el is not None
+                    except:
+                        pass
 
-                    
-                    source_url = page.url
-                    keyboard = InlineKeyboardMarkup(
-                        inline_keyboard=[[InlineKeyboardButton(text="🔗 Ссылка на источник", url=source_url)]]
-                    )
-
-                    full_text = f"<pre>{safe_content}</pre>\n<blockquote>{author_block}</blockquote>"
-
-                    chunks = [full_text[i:i+4000] for i in range(0, len(full_text), 4000)]
-                    for j, chunk in enumerate(chunks):
-                        await bot.send_message(
-                            chat_id=CHANNEL_ID,
-                            text=chunk,
-                            reply_markup=keyboard if j == len(chunks) - 1 else None,
-                            parse_mode=ParseMode.HTML,
-                        )
+                    posts.append({
+                        "text": safe_content,
+                        "author": f"{formatted_nick} | 🕒 {post_time_fmt}" + (" | 📷 Изображение приложено" if has_image else ""),
+                        "url": page.url,
+                        "dt": post_time
+                    })
 
                     await page.go_back()
                     await page.wait_for_selector("div.card-content-box", timeout=15000)
@@ -512,7 +533,26 @@ async def cmd_news(message: Message, bot: Bot):
 
     except Exception as e:
         logging.error(f"❌ Ошибка загрузки страницы: {e}")
-        await message.reply("⚠️ Не удалось загрузить посты. Попробуй позже.")
+        await message.reply("⚠️ Не удалось загрузить посты.")
+        return
+
+    posts.sort(key=lambda p: p["dt"], reverse=True)
+
+    for post in posts:
+        full_text = f"<pre>{post['text']}</pre>\n<blockquote>{escape(post['author'])}</blockquote>"
+        chunks = [full_text[i:i+4000] for i in range(0, len(full_text), 4000)]
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[[InlineKeyboardButton(text="🔗 Ссылка на источник", url=post['url'])]]
+        )
+        for j, chunk in enumerate(chunks):
+            await bot.send_message(
+                chat_id=CHANNEL_ID,
+                text=chunk,
+                reply_markup=keyboard if j == len(chunks) - 1 else None,
+                parse_mode=ParseMode.HTML,
+            )
+
+
 
 def format_monospaced_table(positions_dict: dict, old_positions: dict, old_tokens: set) -> str:
     lines = []
