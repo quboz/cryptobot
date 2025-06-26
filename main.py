@@ -728,14 +728,20 @@ async def stat_command(message: types.Message):
 
 async def check_stat_periodically():
     while True:
-        print("🔁 Авто-проверка...")
+        logging.info("🔁 Авто-проверка статистики...")
         try:
+            # Пробуем получить обновлённую таблицу (если были изменения)
             text = await fetch_stat_text()
             if text:
+                logging.info("📨 Отправка обновлённой статистики в ЛС...")
                 await bot.send_message(chat_id=CHANNEL_ID, text=text, parse_mode=ParseMode.HTML)
+            else:
+                logging.info("ℹ️ Нет новых изменений — отправка не требуется.")
         except Exception as e:
-            print("❌ Ошибка автообновления:", e)
-        await asyncio.sleep(360)  
+            logging.exception(f"❌ Ошибка автообновления статистики: {e}")
+        
+        await asyncio.sleep(360)  # Ждём 6 минут до следующей проверки
+
 
 def save_post_id(token: str, post_id: str):
     with sqlite3.connect(DB_PATH1) as conn:
