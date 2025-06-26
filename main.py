@@ -39,7 +39,7 @@ TRACKED_TOKENS = set()
 
 openai_client = OpenAI(
     base_url="https://openrouter.ai/api/v1",
-    api_key="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",
+    api_key="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",
 )
 
 def migrate_db():
@@ -728,7 +728,7 @@ async def stat_command(message: types.Message):
 
 async def check_stat_periodically():
     while True:
-        logging.info("🔁 Авто-проверка статистики...")
+        logging.info("🔁 Авто-проверка статистики... (начало цикла)")
         try:
             # Пробуем получить обновлённую таблицу (если были изменения)
             text = await fetch_stat_text()
@@ -740,7 +740,8 @@ async def check_stat_periodically():
         except Exception as e:
             logging.exception(f"❌ Ошибка автообновления статистики: {e}")
         
-        await asyncio.sleep(360)  # Ждём 6 минут до следующей проверки
+        await asyncio.sleep(300)  # Ждём 6 минут до следующей проверки
+
 
 
 def save_post_id(token: str, post_id: str):
@@ -920,6 +921,7 @@ async def main():
     init_db()
     migrate_db()
     asyncio.create_task(check_new_posts())
+    asyncio.create_task(check_stat_periodically())
     await dp.start_polling(bot)
 
 
